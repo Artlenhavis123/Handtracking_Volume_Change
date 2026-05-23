@@ -1,74 +1,99 @@
-#imports
 import cv2
-import mediapipe as mp
-import time
 import math
-import osascript as osascript
+import os
+import time
+import urllib.request
+
+import mediapipe as mp
+import osascript
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarksConnections
 
 
-#functions
-def calculateDistance(x1,y1,x2,y2):
-    '''this function works out the distance between two coordinates. Im using this to calculate the distance between my thumb and my index finger'''
-    dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-    return dist
+MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/1/hand_landmarker.task"
+)
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "hand_landmarker.task")
 
-def midpoint(x1,y1,x2,y2):
-    '''This function returns the midpoint of two coordinates. This helps me find the midpoint to place the text on the line for visual benefit'''
-    midx = (x1+x2)/2
-    midy = (y1+y2)/2
-    return midx, midy
 
+def calculateDistance(x1, y1, x2, y2):
+    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+
+def midpoint(x1, y1, x2, y2):
+    return (x1 + x2) / 2, (y1 + y2) / 2
+
+
+if not os.path.exists(MODEL_PATH):
+    print("Downloading hand_landmarker.task model...")
+    urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+
+options = mp_vision.HandLandmarkerOptions(
+    base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
+    running_mode=mp_vision.RunningMode.VIDEO,
+    num_hands=2,
+    min_hand_detection_confidence=0.5,
+    min_hand_presence_confidence=0.5,
+    min_tracking_confidence=0.5,
+)
+landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
 cap = cv2.VideoCapture(0)
-
-mpHands = mp.solutions.hands
-hands = mpHands.Hands(static_image_mode=False,
-                      max_num_hands=2,
-                      min_detection_confidence=0.5,
-                      min_tracking_confidence=0.5)
-mpDraw = mp.solutions.drawing_utils
-
-distance = 0
+last_volume = -1
+start = time.time()
 
 while True:
     success, img = cap.read()
+    if not success:
+        continue
+
     imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    results = hands.process(imgRGB)
-    #print(results.multi_hand_landmarks)
-    if results.multi_hand_landmarks:
-        for handLms in results.multi_hand_landmarks:
-            for id, lm in enumerate(handLms.landmark):
-                #print(id,lm)
-                h, w, c = img.shape
-                tipx = int(handLms.landmark[8].x * w)
-                tipy = int(handLms.landmark[8].y * h)
-                cx, cy = int(lm.x *w), int(lm.y*h)
-                if id == 4:
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=imgRGB)
+    timestamp_ms = int((time.time() - start) * 1000)
+    result = landmarker.detect_for_video(mp_image, timestamp_ms)
 
-                    distance = calculateDistance(cx, cy, tipx, tipy)
-                    mx, my = midpoint(cx, cy, tipx, tipy)
-                    cv2.circle(img, (cx,cy), 10, (224,186,255), cv2.FILLED)
-                    cv2.line(img, (cx, cy), (tipx,tipy), (0,255,0), 10)
+    if result.hand_landmarks:
+        h, w, _ = img.shape
+        for hand in result.hand_landmarks:
+            thumb = hand[4]
+            index = hand[8]
+            thumb_x, thumb_y = int(thumb.x * w), int(thumb.y * h)
+            index_x, index_y = int(index.x * w), int(index.y * h)
 
+            distance = calculateDistance(thumb_x, thumb_y, index_x, index_y)
+            mx, my = midpoint(thumb_x, thumb_y, index_x, index_y)
 
-                    #These if statments help turn the disatnce into a percentage to change volume 
-                    if distance < 50:
-                        volume = 0
-                    elif distance > 300:
-                        volume = 100
-                    else:
-                        volume = int((distance/350)*100)
+            cv2.circle(img, (thumb_x, thumb_y), 10, (224, 186, 255), cv2.FILLED)
+            cv2.line(img, (thumb_x, thumb_y), (index_x, index_y), (0, 255, 0), 10)
 
-                    dist_vol = "{} / {}%".format(str(int(distance)), volume)
+            if distance < 50:
+                volume = 0
+            elif distance > 300:
+                volume = 100
+            else:
+                volume = int((distance / 350) * 100)
 
-                    cv2.putText(img, dist_vol, (int(mx), int(my)), cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 255),3)
+            dist_vol = "{} / {}%".format(int(distance), volume)
+            cv2.putText(img, dist_vol, (int(mx), int(my)),
+                        cv2.FONT_HERSHEY_PLAIN, 3, (255, 0, 255), 3)
 
-                    vol = "set volume output volume {}".format(volume)
-                    osascript.osascript(vol)
+            if volume != last_volume:
+                osascript.osascript("set volume output volume {}".format(volume))
+                last_volume = volume
 
-            mpDraw.draw_landmarks(img, handLms, mpHands.HAND_CONNECTIONS)
-
+            # Skeleton overlay (manual draw — keeps deps minimal)
+            for conn in HandLandmarksConnections.HAND_CONNECTIONS:
+                a, b = hand[conn.start], hand[conn.end]
+                cv2.line(img,
+                         (int(a.x * w), int(a.y * h)),
+                         (int(b.x * w), int(b.y * h)),
+                         (224, 224, 224), 2)
 
     cv2.imshow("Image", img)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-    cv2.waitKey(1)
+cap.release()
+cv2.destroyAllWindows()

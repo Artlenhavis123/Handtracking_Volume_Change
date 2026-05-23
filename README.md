@@ -9,10 +9,10 @@ Control your Mac's volume by pinching your thumb and index finger together or ap
 ## How It Works
 
 1. Webcam captures a live video feed
-2. [MediaPipe](https://mediapipe.dev/) detects hand landmarks in real time (21 keypoints per hand)
+2. [MediaPipe Tasks](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) detects hand landmarks in real time (21 keypoints per hand)
 3. The Euclidean distance between the **thumb tip** (landmark 4) and **index finger tip** (landmark 8) is calculated
 4. That distance is mapped to a volume percentage (0–100%)
-5. System volume is updated instantly via `osascript`
+5. System volume is updated instantly via `osascript` (only when the value changes)
 
 ## Features
 
@@ -27,7 +27,7 @@ Control your Mac's volume by pinching your thumb and index finger together or ap
 |---|---|
 | Python 3 | Core language |
 | OpenCV (`cv2`) | Webcam capture and image rendering |
-| MediaPipe | Hand landmark detection |
+| MediaPipe Tasks | Hand landmark detection (`HandLandmarker`) |
 | osascript | macOS system volume control |
 | math | Euclidean distance calculation |
 
@@ -42,9 +42,13 @@ Control your Mac's volume by pinching your thumb and index finger together or ap
 ```bash
 git clone https://github.com/Artlenhavis123/Handtracking_Volume_Change.git
 cd Handtracking_Volume_Change
-pip install opencv-python mediapipe osascript
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 python main.py
 ```
+
+On first run, the MediaPipe `hand_landmarker.task` model (~8 MB) is downloaded automatically into the project directory.
 
 ## Usage
 

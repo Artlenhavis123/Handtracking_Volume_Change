@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# MediaPipe model — downloaded automatically on first run
+hand_landmarker.task
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
